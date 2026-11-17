@@ -8,4 +8,4 @@ Scan this code in F-Droid, under Settings, Repositories, or add this address the
 
     https://fdroid.synaelle.com/repo?fingerprint=5638BBC46F77E797F3B368A403510EE4292CF91698624A53A5275C2ACA4B70C4
 
-The apps here are Ficelle, lightweight notes in Markdown. A new release of an app shows up within about three hours.
+The apps here are Ficelle, lightweight notes in Markdown. A new release of an app shows up within a day.
