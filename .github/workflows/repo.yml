@@ -1,0 +1,132 @@
+name: repo
+
+# Synaelle's F-Droid repository, served at https://fdroid.synaelle.com/repo.
+# Every two hours it looks at the latest release of each app in apps.json:
+# when one has a store APK this repository does not list yet, it builds the
+# repository again from each app's newest store APK, its metadata here and its
+# listing (fastlane texts and images) from the app's own repository at that
+# release, signed with this repository's key by Debian's fdroidserver. The
+# result goes on the release tagged `repo` as fdroid-repo.tar.gz, with
+# state.json saying what it holds; the server copies it from there.
+#
+# Secrets: FDROID_KEYSTORE, the PKCS12 keystore in base64 (key alias
+# synaelle), and FDROID_KEYSTORE_PASSWORD, for both the store and the key.
+
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when nothing changed
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: repo
+  cancel-in-progress: false
+
+jobs:
+  repo:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: what the apps' latest releases hold
+        id: state
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force || false }}
+        run: |
+          set -eu
+          echo "[]" > state.json
+          while IFS= read -r app; do
+            repo=$(jq -r .repo <<< "$app")
+            release=$(gh api "repos/$repo/releases/latest")
+            tag=$(jq -r .tag_name <<< "$release")
+            asset=$(jq -c --arg apk "$(jq -r .apk <<< "$app")" \
+              '[.assets[] | select(.name | test($apk))] | first // empty
+               | {name, url: .browser_download_url, digest}' <<< "$release")
+            if [ -z "$asset" ]; then
+              echo "$repo $tag has no store APK, left out"
+              continue
+            fi
+            jq --argjson app "$app" --arg tag "$tag" --argjson asset "$asset" \
+              '. + [$app + {tag: $tag, asset: $asset}]' state.json > next.json
+            mv next.json state.json
+            echo "$repo $tag $(jq -r .name <<< "$asset")"
+          done < <(jq -c '.[]' apps.json)
+          test "$(jq length state.json)" -gt 0
+          if gh release download repo -p state.json -O listed.json 2> /dev/null \
+            && [ "$FORCE" != true ] && cmp -s <(jq -S . state.json) <(jq -S . listed.json); then
+            echo "nothing new"
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: the repository, signed, on the release
+        if: steps.state.outputs.build == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          KEYSTORE: ${{ secrets.FDROID_KEYSTORE }}
+          FDROID_KEY_PASSWORD: ${{ secrets.FDROID_KEYSTORE_PASSWORD }}
+        run: |
+          set -eu
+          if [ -z "$KEYSTORE" ] || [ -z "$FDROID_KEY_PASSWORD" ]; then
+            echo "::error::FDROID_KEYSTORE and FDROID_KEYSTORE_PASSWORD are needed"
+            exit 1
+          fi
+          work="$RUNNER_TEMP/fdroid"
+          mkdir -p "$work/repo" "$work/metadata"
+          while IFS= read -r app; do
+            id=$(jq -r .id <<< "$app")
+            repo=$(jq -r .repo <<< "$app")
+            tag=$(jq -r .tag <<< "$app")
+            name=$(jq -r .asset.name <<< "$app")
+            digest=$(jq -r .asset.digest <<< "$app")
+            gh release download "$tag" -R "$repo" -p "$name" -D "$work/repo"
+            echo "${digest#sha256:}  $work/repo/$name" | sha256sum -c --quiet
+            cp "metadata/$id.yml" "$work/metadata/"
+            # the listing as the app's repository had it for that release
+            listing=$(jq -r .listing <<< "$app")
+            git clone -q --depth 1 --branch "$tag" --filter=blob:none --sparse "https://github.com/$repo" "$work/src-$id"
+            git -C "$work/src-$id" sparse-checkout set "$listing"
+            cp -r "$work/src-$id/$listing" "$work/metadata/$id"
+            rm -rf "$work/src-$id"
+          done < <(jq -c '.[]' state.json)
+          printf '%s' "$KEYSTORE" | base64 -d > "$work/keystore.p12"
+          # the password reaches fdroid through its environment, never a file
+          cat > "$work/config.yml" <<'CONFIG'
+          repo_url: https://fdroid.synaelle.com/repo
+          repo_name: Synaelle
+          repo_description: The apps of Synaelle, signed by their developer.
+          archive_older: 0
+          keystore: /work/keystore.p12
+          repo_keyalias: synaelle
+          keystorepass: {env: FDROID_KEY_PASSWORD}
+          keypass: {env: FDROID_KEY_PASSWORD}
+          CONFIG
+          chmod 600 "$work/config.yml" "$work/keystore.p12"
+          # Debian's fdroidserver, the files handed back to the runner's user
+          docker run --rm -e FDROID_KEY_PASSWORD -e OWNER="$(id -u):$(id -g)" -v "$work:/work" -w /work \
+            debian:trixie@sha256:9c6e381421d0f48d1b8133e573f33c185ee16cbf505eda9c4a8a4791b25ea8a6 \
+            bash -euc 'apt-get update -qq > /dev/null
+              DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fdroidserver > /dev/null
+              fdroid --version
+              trap "chown -R \$OWNER /work" EXIT
+              fdroid update'
+          rm -f "$work/keystore.p12"
+          test -f "$work/repo/index-v2.json" && test -f "$work/repo/entry.jar"
+          tar -C "$work" -czf fdroid-repo.tar.gz repo
+          if ! gh release view repo > /dev/null 2>&1; then
+            gh release create repo --latest=false --title "Repository" \
+              --notes "The F-Droid repository's files, which fdroid.synaelle.com serves. Add https://fdroid.synaelle.com/repo in F-Droid."
+          fi
+          # the archive first, the list of what it holds last
+          gh release upload repo fdroid-repo.tar.gz --clobber
+          gh release upload repo state.json --clobber
+          echo "the repository now holds:"
+          jq -r '.[] | "\(.id) \(.tag)"' state.json
