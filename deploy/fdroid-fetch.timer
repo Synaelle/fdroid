@@ -1,0 +1,11 @@
+[Unit]
+Description=Copy Synaelle's F-Droid repository every hour
+
+[Timer]
+# the repository's workflow runs at 17 past every second hour
+OnCalendar=*-*-* *:47:00
+RandomizedDelaySec=120
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=Copy Synaelle's F-Droid repository from GitHub
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# its own user, which owns the repository folder and can write nowhere else
+User=fdroid-fetch
+Group=fdroid-fetch
+UMask=0022
+ExecStart=/opt/fdroid/fetch.sh /opt/fdroid/site
+ProtectSystem=strict
+ReadWritePaths=/opt/fdroid/site
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
