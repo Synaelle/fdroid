@@ -1,7 +1,7 @@
 name: repo
 
 # Synaelle's F-Droid repository, served at https://fdroid.synaelle.com/repo.
-# Every two hours it looks at the latest release of each app in apps.json:
+# Once a day it looks at the latest release of each app in apps.json:
 # when one has a store APK this repository does not list yet, it builds the
 # repository again from each app's newest store APK, its metadata here and its
 # listing (fastlane texts and images) from the app's own repository at that
@@ -14,7 +14,7 @@ name: repo
 
 on:
   schedule:
-    - cron: '17 */2 * * *'
+    - cron: '17 3 * * *'
   workflow_dispatch:
     inputs:
       force:

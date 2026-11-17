@@ -1,9 +1,9 @@
 [Unit]
-Description=Copy Synaelle's F-Droid repository every hour
+Description=Copy Synaelle's F-Droid repository once a day
 
 [Timer]
-# the repository's workflow runs at 17 past every second hour
-OnCalendar=*-*-* *:47:00
+# the repository's workflow runs at 3:17 UTC, and GitHub may start it late
+OnCalendar=*-*-* 04:47:00 UTC
 RandomizedDelaySec=120
 Persistent=true
 
