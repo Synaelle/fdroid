@@ -2,7 +2,7 @@
   {
     "id": "com.synaelle.ficelle",
     "repo": "Synaelle/ficelle",
-    "apk": "^ficelle-[0-9.]+-android-store\\.apk$",
+    "apk": "^ficelle-[0-9.]+-android\\.apk$",
     "listing": "fastlane/metadata/android"
   }
 ]

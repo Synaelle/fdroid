@@ -2,8 +2,8 @@ name: repo
 
 # Synaelle's F-Droid repository, served at https://fdroid.synaelle.com/repo.
 # Once a day it looks at the latest release of each app in apps.json:
-# when one has a store APK this repository does not list yet, it builds the
-# repository again from each app's newest store APK, its metadata here and its
+# when one has an APK this repository does not list yet, it builds the
+# repository again from each app's newest APK, its metadata here and its
 # listing (fastlane texts and images) from the app's own repository at that
 # release, signed with this repository's key by Debian's fdroidserver. The
 # result goes on the release tagged `repo` as fdroid-repo.tar.gz, with
@@ -42,6 +42,7 @@ jobs:
         run: |
           set -eu
           echo "[]" > state.json
+          gh release download repo -p state.json -O listed.json 2> /dev/null || echo "[]" > listed.json
           while IFS= read -r app; do
             repo=$(jq -r .repo <<< "$app")
             release=$(gh api "repos/$repo/releases/latest")
@@ -50,7 +51,10 @@ jobs:
               '[.assets[] | select(.name | test($apk))] | first // empty
                | {name, url: .browser_download_url, digest}' <<< "$release")
             if [ -z "$asset" ]; then
-              echo "$repo $tag has no store APK, left out"
+              # an odd release without its APK keeps the one listed before
+              old=$(jq -c --arg id "$(jq -r .id <<< "$app")" '[.[] | select(.id == $id)] | first // empty' listed.json)
+              echo "::warning::$repo $tag has no APK matching its pattern, kept ${old:+the listed one}"
+              [ -n "$old" ] && jq --argjson old "$old" '. + [$old]' state.json > next.json && mv next.json state.json
               continue
             fi
             jq --argjson app "$app" --arg tag "$tag" --argjson asset "$asset" \
@@ -59,8 +63,7 @@ jobs:
             echo "$repo $tag $(jq -r .name <<< "$asset")"
           done < <(jq -c '.[]' apps.json)
           test "$(jq length state.json)" -gt 0
-          if gh release download repo -p state.json -O listed.json 2> /dev/null \
-            && [ "$FORCE" != true ] && cmp -s <(jq -S . state.json) <(jq -S . listed.json); then
+          if [ "$FORCE" != true ] && cmp -s <(jq -S . state.json) <(jq -S . listed.json); then
             echo "nothing new"
             echo "build=false" >> "$GITHUB_OUTPUT"
           else
